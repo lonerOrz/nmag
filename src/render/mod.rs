@@ -130,6 +130,7 @@ impl WgpuState {
             magnifier_radius: config::DEFAULT_RADIUS,
             zoom: config::DEFAULT_ZOOM,
             _pad: [0.0; 2],
+            pan_offset: [0.0, 0.0],
         };
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
@@ -376,6 +377,7 @@ impl WgpuState {
             magnifier_radius: params.radius,
             zoom: params.zoom,
             _pad: [0.0; 2],
+            pan_offset: [params.pan_x, params.pan_y],
         };
         self.queue
             .write_buffer(&self.uniform_buf, 0, bytemuck::bytes_of(&uni));

@@ -6,6 +6,7 @@ pub struct Uniform {
     pub magnifier_radius: f32,
     pub zoom: f32,
     pub _pad: [f32; 2],
+    pub pan_offset: [f32; 2],
 }
 
 #[repr(C)]

@@ -14,20 +14,18 @@ mod metadata {
 #[command(
     version = metadata::VERSION,
     long_version = metadata::LONG_VERSION,
-    about = "Screen magnifier for Wayland",
+    about = "Full-screen magnifier for Wayland compositors",
 )]
 struct Cli {
     #[arg(short = 'z', long, default_value_t = config::DEFAULT_ZOOM)]
     zoom: f32,
-    #[arg(short = 'r', long, default_value_t = config::DEFAULT_RADIUS)]
-    radius: f32,
 }
 
 fn main() {
     env_logger::init();
     let cli = Cli::parse();
 
-    let (mut st, mut eq) = state::State::setup(cli.zoom, cli.radius);
+    let (mut st, mut eq) = state::State::setup(cli.zoom);
     loop {
         if let Err(e) = eq.blocking_dispatch(&mut st) {
             eprintln!("Wayland dispatch error: {e}");

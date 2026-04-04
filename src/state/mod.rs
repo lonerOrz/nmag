@@ -162,7 +162,7 @@ pub struct State {
 }
 
 impl State {
-    pub fn setup(zoom: f32, radius: f32) -> (Self, EventQueue<Self>) {
+    pub fn setup(zoom: f32) -> (Self, EventQueue<Self>) {
         let conn = Connection::connect_to_env().expect("Wayland connection failed");
         let mut setup_q = conn.new_event_queue();
         let eq = conn.new_event_queue();
@@ -181,7 +181,7 @@ impl State {
         wl.surface.frame(&eq.handle(), ());
         wl.surface.commit();
 
-        let mag = magnifier::MagState::new(zoom, radius, wl.screencopy_mgr.clone(), wl.shm.clone());
+        let mag = magnifier::MagState::new(zoom, wl.screencopy_mgr.clone(), wl.shm.clone());
 
         (
             Self {

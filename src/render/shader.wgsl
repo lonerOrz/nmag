@@ -4,6 +4,7 @@ struct Uniform {
     magnifier_radius: f32,
     zoom: f32,
     _pad: vec2<f32>,
+    pan_offset: vec2<f32>,
 };
 
 @group(0) @binding(0)
@@ -39,33 +40,18 @@ fn vs_main(input: VSIn) -> VSOut {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    // Circle position: flip Y because Wayland Y-down ≠ NDC Y-up
-    let mouse = vec2<f32>(u.mouse_pos.x, u.screen_size.y - u.mouse_pos.y);
+    // Full-screen zoom with pan (drag to move):
+    let center = u.screen_size / 2.0;
+    let screen_px = input.uv * u.screen_size;
 
-    let dist = distance(input.screen_pos, mouse);
+    // Zoom around center + pan offset (Y sign flipped for texture UV)
+    let pan = vec2<f32>(u.pan_offset.x, -u.pan_offset.y);
+    let zoomed_px = center + (screen_px - center - pan) / u.zoom;
 
-    if (dist > u.magnifier_radius) {
-        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    }
-
-    let border = 3.0;
-    let inner_r = u.magnifier_radius - border;
-    if (dist > inner_r) {
-        return vec4<f32>(0.0, 1.0, 1.0, 1.0);
-    }
-
-    let rel = (input.screen_pos - mouse) / u.magnifier_radius;
-    let zoomed = rel / u.zoom;
-    let sample_px = mouse + zoomed * u.magnifier_radius;
-
-    // Texture UV: flip Y to fix mirrored content
     let tex_uv = vec2<f32>(
-        sample_px.x / u.screen_size.x,
-        1.0 - sample_px.y / u.screen_size.y,
+        zoomed_px.x / u.screen_size.x,
+        1.0 - zoomed_px.y / u.screen_size.y,
     );
 
-    let color = textureSample(screen_texture, samp, tex_uv);
-
-    let a = 1.0 - smoothstep(inner_r - 8.0, inner_r, dist);
-    return vec4<f32>(color.rgb * a, a);
+    return textureSample(screen_texture, samp, tex_uv);
 }

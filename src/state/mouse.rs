@@ -11,6 +11,14 @@ use crate::config;
 #[derive(Default)]
 pub struct MouseState {
     cursor_dev: Option<WpCursorShapeDeviceV1>,
+    /// Whether the user is holding left button to drag the view.
+    dragging: bool,
+    /// Mouse position at drag start.
+    drag_start_x: f64,
+    drag_start_y: f64,
+    /// Pan offset at drag start.
+    drag_pan_x: f64,
+    drag_pan_y: f64,
 }
 
 impl MouseState {
@@ -40,7 +48,7 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 state.mag.mouse_y = surface_y;
                 log!(target: "magnifier::mouse", Level::Debug, "Mouse enter: {surface_x},{surface_y}");
                 if let Some(ref dev) = state.mouse.cursor_dev {
-                    dev.set_shape(serial, Shape::Crosshair);
+                    dev.set_shape(serial, Shape::Default);
                 }
             }
             Event::Leave { .. } => {}
@@ -51,20 +59,40 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
             } => {
                 state.mag.mouse_x = surface_x;
                 state.mag.mouse_y = surface_y;
+
+                if state.mouse.dragging {
+                    let dx = surface_x - state.mouse.drag_start_x;
+                    let dy = surface_y - state.mouse.drag_start_y;
+                    state.mag.pan_x = state.mouse.drag_pan_x + dx;
+                    state.mag.pan_y = state.mouse.drag_pan_y + dy;
+                }
             }
             Event::Button {
                 button,
-                state: WEnum::Value(ButtonState::Pressed),
+                state: WEnum::Value(btn_state),
                 ..
-            } => {
-                if button == config::BTN_LEFT {
-                    log!(target: "magnifier::mouse", Level::Info, "Exit on click");
-                    state.quit = true;
+            } => match btn_state {
+                ButtonState::Pressed => {
+                    if button == config::BTN_LEFT {
+                        state.mouse.dragging = true;
+                        state.mouse.drag_start_x = state.mag.mouse_x;
+                        state.mouse.drag_start_y = state.mag.mouse_y;
+                        state.mouse.drag_pan_x = state.mag.pan_x;
+                        state.mouse.drag_pan_y = state.mag.pan_y;
+                    } else if button == config::BTN_RIGHT || button == config::BTN_MIDDLE {
+                        log!(target: "magnifier::mouse", Level::Info, "Exit on click");
+                        state.quit = true;
+                    }
                 }
-            }
+                ButtonState::Released => {
+                    if button == config::BTN_LEFT {
+                        state.mouse.dragging = false;
+                    }
+                }
+                _ => {}
+            },
             Event::Axis { value, .. } => {
-                // Scroll relative to the animation target, not the in-flight displayed value.
-                // Prevents jumps when the user scrolls mid-animation.
+                // Scroll to zoom.
                 let base = state.mag.target_zoom() as f64;
                 let factor = config::ZOOM_FACTOR_BASE.powf(-value / config::ZOOM_DIVISOR);
                 let new_zoom =

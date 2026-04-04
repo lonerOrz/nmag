@@ -48,6 +48,9 @@ pub struct MagState {
     pub mouse_y: f64,
     pub screen_w: u32,
     pub screen_h: u32,
+    /// Pan offset accumulated from dragging (pixels, screen-space).
+    pub pan_x: f64,
+    pub pan_y: f64,
     buffer: Option<ScreenBuf>,
     /// True when a screencopy frame has been fully written and is ready to read.
     pub buffer_ready: bool,
@@ -59,21 +62,18 @@ pub struct MagState {
 }
 
 impl MagState {
-    pub fn new(
-        default_zoom: f32,
-        default_radius: f32,
-        screencopy_mgr: ZwlrScreencopyManagerV1,
-        shm: WlShm,
-    ) -> Self {
+    pub fn new(default_zoom: f32, screencopy_mgr: ZwlrScreencopyManagerV1, shm: WlShm) -> Self {
         Self {
             zoom: default_zoom,
             target_zoom: default_zoom,
             animating: false,
-            radius: default_radius,
+            radius: 0.0,
             mouse_x: 0.0,
             mouse_y: 0.0,
             screen_w: 0,
             screen_h: 0,
+            pan_x: 0.0,
+            pan_y: 0.0,
             buffer: None,
             buffer_ready: false,
             screencopy_mgr,
@@ -90,18 +90,9 @@ impl MagState {
             mouse_y: self.mouse_y as f32,
             radius: self.radius,
             zoom: self.zoom,
+            pan_x: self.pan_x as f32,
+            pan_y: self.pan_y as f32,
         }
-    }
-
-    /// Returns screen buffer data if a screencopy frame is ready.
-    pub fn screen_data(&self) -> Option<ScreenData<'_>> {
-        let buf = self.buffer.as_ref()?;
-        Some(ScreenData {
-            data: buf.as_slice(),
-            width: buf.width,
-            height: buf.height,
-            stride: buf.stride,
-        })
     }
 
     /// Set a new target zoom. This starts (or restarts) the smooth animation.
@@ -118,7 +109,6 @@ impl MagState {
 
     /// Advance the zoom animation by `dt` seconds.
     /// Uses exponential decay: zoom += (target - zoom) * (1 - e^(-k·dt)).
-    /// Should be called once per frame before rendering.
     pub fn tick(&mut self, dt: f32) {
         if !self.animating {
             return;
@@ -129,14 +119,24 @@ impl MagState {
             self.animating = false;
             return;
         }
-        // Exponential ease: each step closes a fraction of the remaining gap.
         self.zoom += diff * (1.0 - (-config::ZOOM_EASE_SPEED * dt).exp());
 
-        // Guard against overshoot (e.g. large dt after window unfocus).
+        // Guard against overshoot.
         if (self.target_zoom - self.zoom).signum() != diff.signum() {
             self.zoom = self.target_zoom;
             self.animating = false;
         }
+    }
+
+    /// Returns screen buffer data if a screencopy frame is ready.
+    pub fn screen_data(&self) -> Option<ScreenData<'_>> {
+        let buf = self.buffer.as_ref()?;
+        Some(ScreenData {
+            data: buf.as_slice(),
+            width: buf.width,
+            height: buf.height,
+            stride: buf.stride,
+        })
     }
 
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {

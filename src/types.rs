@@ -9,6 +9,9 @@ pub struct MagnifierParams {
     pub mouse_y: f32,
     pub radius: f32,
     pub zoom: f32,
+    /// Accumulated pan offset in screen pixels.
+    pub pan_x: f32,
+    pub pan_y: f32,
 }
 
 /// A borrowed view of a screencopy buffer ready for GPU upload.

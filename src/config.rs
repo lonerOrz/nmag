@@ -25,6 +25,8 @@ pub const DEFAULT_RADIUS: f32 = 150.0;
 
 // Input scancodes / button codes
 pub const BTN_LEFT: u32 = 272;
+pub const BTN_RIGHT: u32 = 273;
+pub const BTN_MIDDLE: u32 = 274;
 pub const KEY_ESCAPE_SCANCODE: u32 = 1;
 
 // Shared memory
