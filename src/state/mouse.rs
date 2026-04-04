@@ -11,7 +11,6 @@ use crate::config;
 #[derive(Default)]
 pub struct MouseState {
     cursor_dev: Option<WpCursorShapeDeviceV1>,
-    last_enter_serial: Option<u32>,
 }
 
 impl MouseState {
@@ -39,7 +38,6 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
             } => {
                 state.mag.mouse_x = surface_x;
                 state.mag.mouse_y = surface_y;
-                state.mouse.last_enter_serial = Some(serial);
                 log!(target: "magnifier::mouse", Level::Debug, "Mouse enter: {surface_x},{surface_y}");
                 if let Some(ref dev) = state.mouse.cursor_dev {
                     dev.set_shape(serial, Shape::Crosshair);
@@ -68,7 +66,8 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 let old_zoom = state.mag.zoom;
                 let factor = config::ZOOM_FACTOR_BASE.powf(-value / config::ZOOM_DIVISOR);
                 state.mag.zoom = ((old_zoom as f64) * factor)
-                    .clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64) as f32;
+                    .clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64)
+                    as f32;
                 if (state.mag.zoom - old_zoom).abs() > config::ZOOM_LOG_THRESHOLD {
                     log!(target: "magnifier::mouse", Level::Debug, "Zoom: {} -> {}", old_zoom, state.mag.zoom);
                 }

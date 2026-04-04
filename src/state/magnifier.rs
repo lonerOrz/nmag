@@ -7,11 +7,8 @@ use wayland_client::protocol::wl_output::WlOutput;
 use wayland_client::protocol::wl_shm::WlShm;
 use wayland_client::protocol::wl_shm_pool::WlShmPool;
 use wayland_client::{Connection, Dispatch, Proxy, QueueHandle, WEnum};
-
-use wayland_protocols_wlr::screencopy::v1::client::{
-    zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
-    zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
-};
+use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1;
+use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1;
 
 use crate::config;
 use crate::error::{MagnifierError, Result};
@@ -19,8 +16,8 @@ use crate::types::{MagnifierParams, ScreenData};
 
 /// Raw pixel buffer backed by a memory-mapped shared memory fd.
 pub struct ScreenBuf {
-    pub data: NonNull<u8>,
-    pub len: usize,
+    data: NonNull<u8>,
+    len: usize,
     pub width: u32,
     pub height: u32,
     pub stride: u32,
@@ -33,10 +30,8 @@ unsafe impl Send for ScreenBuf {}
 unsafe impl Sync for ScreenBuf {}
 
 impl ScreenBuf {
-    /// Copy the buffer contents into an owned Vec, breaking the lifetime tied to mmap.
-    pub fn to_owned(&self) -> Vec<u8> {
-        let slice = unsafe { std::slice::from_raw_parts(self.data.as_ptr(), self.len) };
-        slice.to_vec()
+    fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.data.as_ptr(), self.len) }
     }
 }
 
@@ -48,17 +43,23 @@ pub struct MagState {
     pub mouse_y: f64,
     pub screen_w: u32,
     pub screen_h: u32,
-    pub buffer: Option<ScreenBuf>,
+    buffer: Option<ScreenBuf>,
+    /// True when a screencopy frame has been fully written and is ready to read.
     pub buffer_ready: bool,
-    pub screencopy_mgr: Option<ZwlrScreencopyManagerV1>,
-    pub shm: Option<WlShm>,
+    pub screencopy_mgr: ZwlrScreencopyManagerV1,
+    pub shm: WlShm,
     // Kept alive until the compositor releases them (see hyprmag's PoolBuffer pattern)
     _pool: Option<WlShmPool>,
     _buffer: Option<WlBuffer>,
 }
 
 impl MagState {
-    pub fn new(default_zoom: f32, default_radius: f32) -> Self {
+    pub fn new(
+        default_zoom: f32,
+        default_radius: f32,
+        screencopy_mgr: ZwlrScreencopyManagerV1,
+        shm: WlShm,
+    ) -> Self {
         Self {
             zoom: default_zoom,
             radius: default_radius,
@@ -68,8 +69,8 @@ impl MagState {
             screen_h: 0,
             buffer: None,
             buffer_ready: false,
-            screencopy_mgr: None,
-            shm: None,
+            screencopy_mgr,
+            shm,
             _pool: None,
             _buffer: None,
         }
@@ -85,16 +86,11 @@ impl MagState {
         }
     }
 
-    /// Take the ready screen buffer as owned data, consuming the buffer in the process.
-    /// Returns None if no buffer is ready yet.
-    pub fn take_screen_data(&mut self) -> Option<ScreenData> {
-        if !self.buffer_ready {
-            return None;
-        }
-        let buf = self.buffer.take()?;
-        self.buffer_ready = false;
+    /// Returns screen buffer data if a screencopy frame is ready.
+    pub fn screen_data(&self) -> Option<ScreenData<'_>> {
+        let buf = self.buffer.as_ref()?;
         Some(ScreenData {
-            data: buf.to_owned(),
+            data: buf.as_slice(),
             width: buf.width,
             height: buf.height,
             stride: buf.stride,
@@ -102,11 +98,8 @@ impl MagState {
     }
 
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
-        let Some(mgr) = &self.screencopy_mgr else {
-            return;
-        };
         log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
-        let _frame = mgr.capture_output(1, output, qh, ());
+        let _frame = self.screencopy_mgr.capture_output(1, output, qh, ());
     }
 }
 
@@ -143,7 +136,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for super::State {
                 let fmt = match format {
                     WEnum::Value(f) => f,
                     WEnum::Unknown(v) => {
-                        log!(target: "magnifier::sc", Level::Error, "bad format: {}", v);
+                        log!(target: "magnifier::sc", Level::Error, "bad format: {v}");
                         return;
                     }
                 };
@@ -162,22 +155,13 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for super::State {
                 }
 
                 // Create wl_buffer and keep it alive until Ready
-                if let Some(ref shm) = state.mag.shm {
-                    let pool = shm.create_pool(fd.as_fd(), len as i32, qh, ());
-                    let buf = pool.create_buffer(
-                        0,
-                        width as i32,
-                        height as i32,
-                        stride as i32,
-                        fmt,
-                        qh,
-                        (),
-                    );
-                    frame.copy(&buf);
-                    // DON'T destroy — compositor writes asynchronously
-                    state.mag._pool = Some(pool);
-                    state.mag._buffer = Some(buf);
-                }
+                let pool = state.mag.shm.create_pool(fd.as_fd(), len as i32, qh, ());
+                let buf =
+                    pool.create_buffer(0, width as i32, height as i32, stride as i32, fmt, qh, ());
+                frame.copy(&buf);
+                // DON'T destroy — compositor writes asynchronously
+                state.mag._pool = Some(pool);
+                state.mag._buffer = Some(buf);
 
                 // Now mmap
                 let mmap = match unsafe { memmap2::MmapOptions::new().len(len).map_mut(&fd) } {

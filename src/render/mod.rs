@@ -41,7 +41,6 @@ pub struct WgpuState {
     device: wgpu::Device,
     queue: wgpu::Queue,
     pipeline: wgpu::RenderPipeline,
-    screen_tex: Option<wgpu::Texture>,
     sampler: wgpu::Sampler,
     vbuf: wgpu::Buffer,
     ibuf: wgpu::Buffer,
@@ -299,7 +298,6 @@ impl WgpuState {
             device,
             queue,
             pipeline,
-            screen_tex: None,
             sampler,
             vbuf,
             ibuf,
@@ -365,7 +363,8 @@ impl WgpuState {
                 },
             ],
         });
-        self.screen_tex = Some(tex);
+        // The bind_group holds a ref-counted handle to the texture view,
+        // which in turn holds the texture alive. No separate field needed.
     }
 
     /// Render the magnifier effect using the given parameters.
@@ -387,10 +386,16 @@ impl WgpuState {
                 self.surface.configure(&self.device, &self.config);
                 match self.surface.get_current_texture() {
                     Ok(o) => o,
-                    Err(_) => return,
+                    Err(e) => {
+                        log!(target: "magnifier::render", Level::Warn, "Surface recovery failed: {e}");
+                        return;
+                    }
                 }
             }
-            Err(_) => return,
+            Err(e) => {
+                log!(target: "magnifier::render", Level::Warn, "Surface get failed: {e}");
+                return;
+            }
         };
 
         let view = output

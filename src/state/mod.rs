@@ -58,13 +58,13 @@ struct SetupState {
 impl SetupState {
     fn into_state(self, connection: Connection, display: WlDisplay) -> Result<Wl> {
         Ok(Wl {
-            connection,
-            display,
-            compositor: require_global(self.compositor, "wl_compositor")?,
+            _connection: connection,
+            _display: display,
+            _compositor: require_global(self.compositor, "wl_compositor")?,
             surface: require_global(self.surface, "wl_surface")?,
-            seat: require_global(self.seat, "wl_seat")?,
-            layer_shell: require_global(self.layer_shell, "zwlr_layer_shell_v1")?,
-            layer_surface: require_global(self.layer_surface, "zwlr_layer_surface_v1")?,
+            _seat: require_global(self.seat, "wl_seat")?,
+            _layer_shell: require_global(self.layer_shell, "zwlr_layer_shell_v1")?,
+            _layer_surface: require_global(self.layer_surface, "zwlr_layer_surface_v1")?,
             cursor_mgr: require_global(self.cursor_mgr, "wp_cursor_shape_manager_v1")?,
             screencopy_mgr: require_global(self.screencopy_mgr, "zwlr_screencopy_manager_v1")?,
             shm: require_global(self.shm, "wl_shm")?,
@@ -169,15 +169,17 @@ impl State {
         let _reg = display.get_registry(&setup_q.handle(), eq.handle());
 
         let mut tmp = SetupState::default();
-        setup_q.roundtrip(&mut tmp).expect("Initial roundtrip failed");
+        setup_q
+            .roundtrip(&mut tmp)
+            .expect("Initial roundtrip failed");
 
-        let wl = tmp.into_state(conn, display).expect("Wayland globals negotiation failed");
+        let wl = tmp
+            .into_state(conn, display)
+            .expect("Wayland globals negotiation failed");
         wl.surface.frame(&eq.handle(), ());
         wl.surface.commit();
 
-        let mut mag = magnifier::MagState::new(zoom, radius);
-        mag.screencopy_mgr = Some(wl.screencopy_mgr.clone());
-        mag.shm = Some(wl.shm.clone());
+        let mag = magnifier::MagState::new(zoom, radius, wl.screencopy_mgr.clone(), wl.shm.clone());
 
         (
             Self {
@@ -212,9 +214,12 @@ impl State {
 
         // Upload screencopy data if available
         if self.mag.buffer_ready {
-            let Some(wgpu) = self.wgpu.as_mut() else { return };
-            if let Some(data) = self.mag.take_screen_data() {
-                wgpu.upload_screen_texture(data.width, data.height, data.stride, &data.data);
+            self.mag.buffer_ready = false;
+            let Some(wgpu) = self.wgpu.as_mut() else {
+                return;
+            };
+            if let Some(screen) = self.mag.screen_data() {
+                wgpu.upload_screen_texture(screen.width, screen.height, screen.stride, screen.data);
                 self.screencopy_pending = false;
                 self.has_clean_capture = true;
             }
@@ -248,28 +253,19 @@ impl Drop for State {
 }
 
 /// Wayland protocol objects kept alive for the lifetime of the application.
-/// Fields marked #[allow(dead_code)] are stored solely to prevent the
-/// Wayland proxy from being dropped (which would send a destroy request).
+/// Fields prefixed with `_` are stored solely to prevent the proxy from
+/// being dropped (which would send a destroy request to the compositor).
 pub struct Wl {
-    #[allow(dead_code)]
-    connection: Connection,
-    #[allow(dead_code)]
-    display: WlDisplay,
-    /// Kept alive to prevent surface destruction.
-    #[allow(dead_code)]
-    compositor: WlCompositor,
-    surface: WlSurface,
-    /// Kept alive for pointer/keyboard capabilities.
-    #[allow(dead_code)]
-    seat: WlSeat,
-    /// Kept alive to prevent layer surface destruction.
-    #[allow(dead_code)]
-    layer_shell: ZwlrLayerShellV1,
-    #[allow(dead_code)]
-    layer_surface: ZwlrLayerSurfaceV1,
-    cursor_mgr: WpCursorShapeManagerV1,
-    screencopy_mgr: ZwlrScreencopyManagerV1,
-    shm: WlShm,
+    _connection: Connection,
+    _display: WlDisplay,
+    _compositor: WlCompositor,
+    pub surface: WlSurface,
+    _seat: WlSeat,
+    _layer_shell: ZwlrLayerShellV1,
+    _layer_surface: ZwlrLayerSurfaceV1,
+    pub cursor_mgr: WpCursorShapeManagerV1,
+    pub screencopy_mgr: ZwlrScreencopyManagerV1,
+    pub shm: WlShm,
     pub output: WlOutput,
 }
 
@@ -349,8 +345,8 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for State {
             lsf.ack_configure(serial);
             if state.wgpu.is_none() {
                 state.wgpu = Some(WgpuState::new(
-                    &state.wl.as_ref().expect("wl not available").display,
-                    &state.wl.as_ref().expect("wl not available").surface,
+                    &state.wl.as_ref().unwrap()._display,
+                    &state.wl.as_ref().unwrap().surface,
                     width,
                     height,
                 ));
@@ -388,11 +384,10 @@ impl Dispatch<WlKeyboard, ()> for State {
             && let wayland_client::WEnum::Value(
                 wayland_client::protocol::wl_keyboard::KeyState::Pressed,
             ) = key_state
+            && key == config::KEY_ESCAPE_SCANCODE
         {
-            if key == config::KEY_ESCAPE_SCANCODE {
-                log!(target: "magnifier::wl", Level::Info, "Escape pressed, exiting");
-                state.quit = true;
-            }
+            log!(target: "magnifier::wl", Level::Info, "Escape pressed, exiting");
+            state.quit = true;
         }
     }
 }

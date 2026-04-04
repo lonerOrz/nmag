@@ -1,4 +1,4 @@
-/// Configuration constants for the magnifier.
+// Configuration constants for the magnifier.
 
 // Zoom range limits
 pub const ZOOM_MIN: f32 = 0.1;
@@ -10,14 +10,6 @@ pub const ZOOM_DIVISOR: f64 = 100.0;
 
 // Zoom delta threshold for logging (avoids spam on tiny changes)
 pub const ZOOM_LOG_THRESHOLD: f32 = 0.001;
-
-// Shader visual parameters (must match shader.wgsl values)
-// NOTE: border and soft-edge are currently hardcoded in shader.wgsl;
-// these constants are here for future uniform injection.
-#[allow(dead_code)]
-pub const MAGNIFIER_BORDER: f32 = 3.0;
-#[allow(dead_code)]
-pub const MAGNIFIER_SOFT_EDGE: f32 = 8.0;
 
 // Default CLI values
 pub const DEFAULT_ZOOM: f32 = 2.0;
