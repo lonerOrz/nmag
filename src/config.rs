@@ -11,6 +11,14 @@ pub const ZOOM_DIVISOR: f64 = 100.0;
 // Zoom delta threshold for logging (avoids spam on tiny changes)
 pub const ZOOM_LOG_THRESHOLD: f32 = 0.001;
 
+// Zoom animation: exponential ease speed (units per second).
+// Higher = snappier. ~12 gives a natural ~300ms transition for a 2× zoom jump.
+pub const ZOOM_EASE_SPEED: f32 = 20.0;
+
+// Assumed frame interval for fixed-dt animation (60 fps).
+// The exponential ease is insensitive to small dt variations.
+pub const ASSUMED_DT: f32 = 1.0 / 60.0;
+
 // Default CLI values
 pub const DEFAULT_ZOOM: f32 = 2.0;
 pub const DEFAULT_RADIUS: f32 = 150.0;

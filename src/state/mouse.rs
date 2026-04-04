@@ -63,14 +63,13 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 }
             }
             Event::Axis { value, .. } => {
-                let old_zoom = state.mag.zoom;
+                // Scroll relative to the animation target, not the in-flight displayed value.
+                // Prevents jumps when the user scrolls mid-animation.
+                let base = state.mag.target_zoom() as f64;
                 let factor = config::ZOOM_FACTOR_BASE.powf(-value / config::ZOOM_DIVISOR);
-                state.mag.zoom = ((old_zoom as f64) * factor)
-                    .clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64)
-                    as f32;
-                if (state.mag.zoom - old_zoom).abs() > config::ZOOM_LOG_THRESHOLD {
-                    log!(target: "magnifier::mouse", Level::Debug, "Zoom: {} -> {}", old_zoom, state.mag.zoom);
-                }
+                let new_zoom =
+                    (base * factor).clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64) as f32;
+                state.mag.set_target_zoom(new_zoom);
             }
             Event::Frame => {}
             _ => {}

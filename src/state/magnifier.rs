@@ -37,7 +37,12 @@ impl ScreenBuf {
 
 /// State for the magnifier: zoom, position, screencopy frame management.
 pub struct MagState {
+    /// Displayed zoom — the value actually used for rendering.
     pub zoom: f32,
+    /// Target zoom — where the displayed zoom is animating towards.
+    target_zoom: f32,
+    /// True when displayed_zoom has not yet converged to target_zoom.
+    animating: bool,
     pub radius: f32,
     pub mouse_x: f64,
     pub mouse_y: f64,
@@ -62,6 +67,8 @@ impl MagState {
     ) -> Self {
         Self {
             zoom: default_zoom,
+            target_zoom: default_zoom,
+            animating: false,
             radius: default_radius,
             mouse_x: 0.0,
             mouse_y: 0.0,
@@ -95,6 +102,41 @@ impl MagState {
             height: buf.height,
             stride: buf.stride,
         })
+    }
+
+    /// Set a new target zoom. This starts (or restarts) the smooth animation.
+    pub fn set_target_zoom(&mut self, new_zoom: f32) {
+        self.target_zoom = new_zoom;
+        self.animating = true;
+    }
+
+    /// Returns the current target zoom. Useful for computing new targets relative
+    /// to the animation endpoint rather than the in-flight displayed value.
+    pub fn target_zoom(&self) -> f32 {
+        self.target_zoom
+    }
+
+    /// Advance the zoom animation by `dt` seconds.
+    /// Uses exponential decay: zoom += (target - zoom) * (1 - e^(-k·dt)).
+    /// Should be called once per frame before rendering.
+    pub fn tick(&mut self, dt: f32) {
+        if !self.animating {
+            return;
+        }
+        let diff = self.target_zoom - self.zoom;
+        if diff.abs() < config::ZOOM_LOG_THRESHOLD {
+            self.zoom = self.target_zoom;
+            self.animating = false;
+            return;
+        }
+        // Exponential ease: each step closes a fraction of the remaining gap.
+        self.zoom += diff * (1.0 - (-config::ZOOM_EASE_SPEED * dt).exp());
+
+        // Guard against overshoot (e.g. large dt after window unfocus).
+        if (self.target_zoom - self.zoom).signum() != diff.signum() {
+            self.zoom = self.target_zoom;
+            self.animating = false;
+        }
     }
 
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
