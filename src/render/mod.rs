@@ -8,6 +8,9 @@ use wayland_client::protocol::wl_display::WlDisplay;
 use wayland_client::protocol::wl_surface::WlSurface;
 use wgpu::util::DeviceExt;
 
+use crate::config;
+use crate::types::MagnifierParams;
+
 fn build_quad(w: f32, h: f32) -> ([Vertex; 4], [u16; 6]) {
     (
         [
@@ -57,12 +60,14 @@ impl WgpuState {
 
         let raw_disp = raw_window_handle::RawDisplayHandle::Wayland(
             raw_window_handle::WaylandDisplayHandle::new(
-                std::ptr::NonNull::new(display.id().as_ptr() as *mut _).unwrap(),
+                std::ptr::NonNull::new(display.id().as_ptr() as *mut _)
+                    .expect("Wayland display is null"),
             ),
         );
         let raw_win = raw_window_handle::RawWindowHandle::Wayland(
             raw_window_handle::WaylandWindowHandle::new(
-                std::ptr::NonNull::new(surface.id().as_ptr() as *mut _).unwrap(),
+                std::ptr::NonNull::new(surface.id().as_ptr() as *mut _)
+                    .expect("Wayland surface is null"),
             ),
         );
 
@@ -71,7 +76,7 @@ impl WgpuState {
                 raw_display_handle: raw_disp,
                 raw_window_handle: raw_win,
             })
-            .unwrap()
+            .expect("Failed to create wgpu surface")
         };
 
         let adapter = pollster::block_on(inst.request_adapter(&wgpu::RequestAdapterOptions {
@@ -79,7 +84,7 @@ impl WgpuState {
             force_fallback_adapter: false,
             compatible_surface: Some(&surf),
         }))
-        .expect("No GPU adapter. Install Vulkan drivers.");
+        .expect("No GPU adapter found. Install Vulkan drivers or enable lavapipe.");
 
         log!(target: "magnifier::render", Level::Info, "GPU: {}", adapter.get_info().name);
 
@@ -91,7 +96,7 @@ impl WgpuState {
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,
         }))
-        .unwrap();
+        .expect("Failed to create wgpu device");
 
         let caps = surf.get_capabilities(&adapter);
         let fmt = caps
@@ -123,8 +128,8 @@ impl WgpuState {
         let uni = Uniform {
             screen_size: [w as f32, h as f32],
             mouse_pos: [0.0, 0.0],
-            magnifier_radius: 150.0,
-            zoom: 2.0,
+            magnifier_radius: config::DEFAULT_RADIUS,
+            zoom: config::DEFAULT_ZOOM,
             _pad: [0.0; 2],
         };
         let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -363,12 +368,14 @@ impl WgpuState {
         self.screen_tex = Some(tex);
     }
 
-    pub fn render_magnifier(&self, mag: &crate::state::magnifier::MagState) {
+    /// Render the magnifier effect using the given parameters.
+    /// Accepts a plain `MagnifierParams` struct to avoid coupling to the state module.
+    pub fn render_magnifier(&self, params: &MagnifierParams) {
         let uni = Uniform {
             screen_size: [self.config.width as f32, self.config.height as f32],
-            mouse_pos: [mag.mouse_x as f32, mag.mouse_y as f32],
-            magnifier_radius: mag.radius,
-            zoom: mag.zoom,
+            mouse_pos: [params.mouse_x, params.mouse_y],
+            magnifier_radius: params.radius,
+            zoom: params.zoom,
             _pad: [0.0; 2],
         };
         self.queue
@@ -378,7 +385,10 @@ impl WgpuState {
             Ok(o) => o,
             Err(wgpu::SurfaceError::Outdated) => {
                 self.surface.configure(&self.device, &self.config);
-                self.surface.get_current_texture().unwrap()
+                match self.surface.get_current_texture() {
+                    Ok(o) => o,
+                    Err(_) => return,
+                }
             }
             Err(_) => return,
         };

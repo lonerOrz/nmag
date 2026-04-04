@@ -13,8 +13,11 @@ use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::render::WgpuState;
+use crate::config;
+use crate::error::{MagnifierError, Result};
+use crate::types::{MagnifierParams, ScreenData};
 
+/// Raw pixel buffer backed by a memory-mapped shared memory fd.
 pub struct ScreenBuf {
     pub data: NonNull<u8>,
     pub len: usize,
@@ -24,9 +27,20 @@ pub struct ScreenBuf {
     _mmap: memmap2::MmapMut,
 }
 
+// SAFETY: ScreenBuf owns the mmap'd memory and the NonNull is derived from it.
+// Wayland protocol events are sequential on the main thread.
 unsafe impl Send for ScreenBuf {}
 unsafe impl Sync for ScreenBuf {}
 
+impl ScreenBuf {
+    /// Copy the buffer contents into an owned Vec, breaking the lifetime tied to mmap.
+    pub fn to_owned(&self) -> Vec<u8> {
+        let slice = unsafe { std::slice::from_raw_parts(self.data.as_ptr(), self.len) };
+        slice.to_vec()
+    }
+}
+
+/// State for the magnifier: zoom, position, screencopy frame management.
 pub struct MagState {
     pub zoom: f32,
     pub radius: f32,
@@ -38,16 +52,16 @@ pub struct MagState {
     pub buffer_ready: bool,
     pub screencopy_mgr: Option<ZwlrScreencopyManagerV1>,
     pub shm: Option<WlShm>,
-    // Keep alive until compositor releases them (see hyprmagnifier PoolBuffer)
+    // Kept alive until the compositor releases them (see hyprmag's PoolBuffer pattern)
     _pool: Option<WlShmPool>,
     _buffer: Option<WlBuffer>,
 }
 
 impl MagState {
-    pub fn new() -> Self {
+    pub fn new(default_zoom: f32, default_radius: f32) -> Self {
         Self {
-            zoom: 2.0,
-            radius: 150.0,
+            zoom: default_zoom,
+            radius: default_radius,
             mouse_x: 0.0,
             mouse_y: 0.0,
             screen_w: 0,
@@ -61,6 +75,32 @@ impl MagState {
         }
     }
 
+    /// Build the parameters needed by the renderer.
+    pub fn params(&self) -> MagnifierParams {
+        MagnifierParams {
+            mouse_x: self.mouse_x as f32,
+            mouse_y: self.mouse_y as f32,
+            radius: self.radius,
+            zoom: self.zoom,
+        }
+    }
+
+    /// Take the ready screen buffer as owned data, consuming the buffer in the process.
+    /// Returns None if no buffer is ready yet.
+    pub fn take_screen_data(&mut self) -> Option<ScreenData> {
+        if !self.buffer_ready {
+            return None;
+        }
+        let buf = self.buffer.take()?;
+        self.buffer_ready = false;
+        Some(ScreenData {
+            data: buf.to_owned(),
+            width: buf.width,
+            height: buf.height,
+            stride: buf.stride,
+        })
+    }
+
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
         let Some(mgr) = &self.screencopy_mgr else {
             return;
@@ -68,20 +108,14 @@ impl MagState {
         log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
         let _frame = mgr.capture_output(1, output, qh, ());
     }
-
-    pub fn upload_to_wgpu(&self, wgpu: &mut WgpuState) {
-        let Some(ref buf) = self.buffer else { return };
-        let slice = unsafe { std::slice::from_raw_parts(buf.data.as_ptr(), buf.len) };
-        wgpu.upload_screen_texture(buf.width, buf.height, buf.stride, slice);
-    }
 }
 
-fn create_shm_fd() -> std::io::Result<OwnedFd> {
+fn create_shm_fd() -> Result<OwnedFd> {
     use std::os::unix::io::FromRawFd;
-    let name = b"magnifier\0";
+    let name = format!("{}\0", config::SHM_FD_NAME);
     let fd = unsafe { nix::libc::memfd_create(name.as_ptr() as *const _, 0) };
     if fd < 0 {
-        return Err(std::io::Error::last_os_error());
+        return Err(MagnifierError::ShmFdCreateFailed);
     }
     Ok(unsafe { OwnedFd::from_raw_fd(fd) })
 }
@@ -115,10 +149,19 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for super::State {
                 };
 
                 let len = (stride * height) as usize;
-                let fd = create_shm_fd().expect("shm fd");
-                nix::unistd::ftruncate(&fd, len as i64).expect("ftruncate");
+                let fd = match create_shm_fd() {
+                    Ok(fd) => fd,
+                    Err(e) => {
+                        log!(target: "magnifier::sc", Level::Error, "{e}");
+                        return;
+                    }
+                };
+                if let Err(e) = nix::unistd::ftruncate(&fd, len as i64) {
+                    log!(target: "magnifier::sc", Level::Error, "ftruncate: {e}");
+                    return;
+                }
 
-                // Create wl_buffer and keep it alive until Ready (see hyprmagnifier PoolBuffer)
+                // Create wl_buffer and keep it alive until Ready
                 if let Some(ref shm) = state.mag.shm {
                     let pool = shm.create_pool(fd.as_fd(), len as i32, qh, ());
                     let buf = pool.create_buffer(
@@ -137,13 +180,20 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for super::State {
                 }
 
                 // Now mmap
-                let mmap = unsafe {
-                    memmap2::MmapOptions::new()
-                        .len(len)
-                        .map_mut(&fd)
-                        .expect("mmap")
+                let mmap = match unsafe { memmap2::MmapOptions::new().len(len).map_mut(&fd) } {
+                    Ok(mmap) => mmap,
+                    Err(e) => {
+                        log!(target: "magnifier::sc", Level::Error, "mmap: {e}");
+                        return;
+                    }
                 };
-                let data = NonNull::new(mmap.as_ptr() as *mut u8).unwrap();
+                let data = match NonNull::new(mmap.as_ptr() as *mut u8) {
+                    Some(p) => p,
+                    None => {
+                        log!(target: "magnifier::sc", Level::Error, "mmap returned null pointer");
+                        return;
+                    }
+                };
 
                 state.mag.buffer = Some(ScreenBuf {
                     data,

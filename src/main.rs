@@ -1,5 +1,8 @@
+mod config;
+mod error;
 mod render;
 mod state;
+mod types;
 
 use clap::Parser;
 
@@ -14,9 +17,9 @@ mod metadata {
     about = "Screen magnifier for Wayland",
 )]
 struct Cli {
-    #[arg(short = 'z', long, default_value_t = 2.0)]
+    #[arg(short = 'z', long, default_value_t = config::DEFAULT_ZOOM)]
     zoom: f32,
-    #[arg(short = 'r', long, default_value_t = 150.0)]
+    #[arg(short = 'r', long, default_value_t = config::DEFAULT_RADIUS)]
     radius: f32,
 }
 

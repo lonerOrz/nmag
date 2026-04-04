@@ -5,17 +5,18 @@ use wayland_protocols::wp::cursor_shape::v1::client::wp_cursor_shape_device_v1::
     Shape, WpCursorShapeDeviceV1,
 };
 
+use crate::config;
+
+/// Tracks cursor shape and delegates pointer events to the magnifier state.
 #[derive(Default)]
 pub struct MouseState {
     cursor_dev: Option<WpCursorShapeDeviceV1>,
-    pub mouse_x: f64,
-    pub mouse_y: f64,
     last_enter_serial: Option<u32>,
 }
 
 impl MouseState {
-    pub fn set_cursor_shape_device(&mut self, d: WpCursorShapeDeviceV1) {
-        self.cursor_dev = Some(d);
+    pub fn set_cursor_shape_device(&mut self, dev: WpCursorShapeDeviceV1) {
+        self.cursor_dev = Some(dev);
     }
 }
 
@@ -36,14 +37,12 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 surface_y,
                 ..
             } => {
-                state.mouse.mouse_x = surface_x;
-                state.mouse.mouse_y = surface_y;
                 state.mag.mouse_x = surface_x;
                 state.mag.mouse_y = surface_y;
                 state.mouse.last_enter_serial = Some(serial);
                 log!(target: "magnifier::mouse", Level::Debug, "Mouse enter: {surface_x},{surface_y}");
-                if let Some(ref d) = state.mouse.cursor_dev {
-                    d.set_shape(serial, Shape::Crosshair);
+                if let Some(ref dev) = state.mouse.cursor_dev {
+                    dev.set_shape(serial, Shape::Crosshair);
                 }
             }
             Event::Leave { .. } => {}
@@ -52,8 +51,6 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 surface_y,
                 ..
             } => {
-                state.mouse.mouse_x = surface_x;
-                state.mouse.mouse_y = surface_y;
                 state.mag.mouse_x = surface_x;
                 state.mag.mouse_y = surface_y;
             }
@@ -62,19 +59,17 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 state: WEnum::Value(ButtonState::Pressed),
                 ..
             } => {
-                if button == 272 {
+                if button == config::BTN_LEFT {
                     log!(target: "magnifier::mouse", Level::Info, "Exit on click");
                     state.quit = true;
                 }
             }
             Event::Axis { value, .. } => {
-                // wayland-client already converts wl_fixed_t to f64
-                // Negative value = scroll up (content down) → zoom in
-                // Positive value = scroll down (content up) → zoom out
                 let old_zoom = state.mag.zoom;
-                let factor = 2.0_f64.powf(-value / 100.0);
-                state.mag.zoom = ((old_zoom as f64) * factor).clamp(0.1, 50.0) as f32;
-                if (state.mag.zoom - old_zoom).abs() > 0.001 {
+                let factor = config::ZOOM_FACTOR_BASE.powf(-value / config::ZOOM_DIVISOR);
+                state.mag.zoom = ((old_zoom as f64) * factor)
+                    .clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64) as f32;
+                if (state.mag.zoom - old_zoom).abs() > config::ZOOM_LOG_THRESHOLD {
                     log!(target: "magnifier::mouse", Level::Debug, "Zoom: {} -> {}", old_zoom, state.mag.zoom);
                 }
             }

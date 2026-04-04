@@ -23,6 +23,8 @@ use wayland_protocols_wlr::screencopy::v1::client::zwlr_screencopy_manager_v1::Z
 
 use log::{Level, log};
 
+use crate::config;
+use crate::error::{MagnifierError, Result};
 use crate::render::WgpuState;
 
 macro_rules! delegate_log {
@@ -39,6 +41,7 @@ macro_rules! delegate_log {
     };
 }
 
+/// Collects Wayland globals during the initial roundtrip.
 #[derive(Default)]
 struct SetupState {
     compositor: Option<WlCompositor>,
@@ -53,21 +56,26 @@ struct SetupState {
 }
 
 impl SetupState {
-    fn into_state(self, connection: Connection, display: WlDisplay) -> Wl {
-        Wl {
+    fn into_state(self, connection: Connection, display: WlDisplay) -> Result<Wl> {
+        Ok(Wl {
             connection,
             display,
-            compositor: self.compositor.unwrap(),
-            surface: self.surface.unwrap(),
-            seat: self.seat.unwrap(),
-            layer_shell: self.layer_shell.unwrap(),
-            layer_surface: self.layer_surface.unwrap(),
-            cursor_mgr: self.cursor_mgr.unwrap(),
-            screencopy_mgr: self.screencopy_mgr.unwrap(),
-            shm: self.shm.unwrap(),
-            output: self.output.unwrap(),
-        }
+            compositor: require_global(self.compositor, "wl_compositor")?,
+            surface: require_global(self.surface, "wl_surface")?,
+            seat: require_global(self.seat, "wl_seat")?,
+            layer_shell: require_global(self.layer_shell, "zwlr_layer_shell_v1")?,
+            layer_surface: require_global(self.layer_surface, "zwlr_layer_surface_v1")?,
+            cursor_mgr: require_global(self.cursor_mgr, "wp_cursor_shape_manager_v1")?,
+            screencopy_mgr: require_global(self.screencopy_mgr, "zwlr_screencopy_manager_v1")?,
+            shm: require_global(self.shm, "wl_shm")?,
+            output: require_global(self.output, "wl_output")?,
+        })
     }
+}
+
+/// Helper to produce a clear error when a required global is missing.
+fn require_global<T>(opt: Option<T>, name: &'static str) -> Result<T> {
+    opt.ok_or(MagnifierError::WaylandGlobalMissing { global: name })
 }
 
 impl Dispatch<WlRegistry, QueueHandle<State>> for SetupState {
@@ -106,10 +114,16 @@ impl Dispatch<WlRegistry, QueueHandle<State>> for SetupState {
                     use wayland_protocols_wlr::layer_shell::v1::client::zwlr_layer_surface_v1::{
                         Anchor, KeyboardInteractivity,
                     };
-                    let sf = s.surface.as_ref().unwrap();
+                    let sf = s.surface.as_ref().expect("surface not available");
                     let ls = reg.bind::<ZwlrLayerShellV1, _, _>(name, 4, qh, ());
-                    let lsf =
-                        ls.get_layer_surface(sf, None, Layer::Overlay, "magnifier".into(), qh, ());
+                    let lsf = ls.get_layer_surface(
+                        sf,
+                        None,
+                        Layer::Overlay,
+                        config::LAYER_SURFACE_NAMESPACE.into(),
+                        qh,
+                        (),
+                    );
                     lsf.set_anchor(Anchor::all());
                     lsf.set_keyboard_interactivity(KeyboardInteractivity::Exclusive);
                     lsf.set_exclusive_zone(-1);
@@ -132,6 +146,7 @@ impl Dispatch<WlRegistry, QueueHandle<State>> for SetupState {
     }
 }
 
+/// Top-level application state.
 pub struct State {
     wl: Option<Wl>,
     pub mag: magnifier::MagState,
@@ -146,7 +161,7 @@ pub struct State {
 
 impl State {
     pub fn setup(zoom: f32, radius: f32) -> (Self, EventQueue<Self>) {
-        let conn = Connection::connect_to_env().unwrap();
+        let conn = Connection::connect_to_env().expect("Wayland connection failed");
         let mut setup_q = conn.new_event_queue();
         let eq = conn.new_event_queue();
 
@@ -154,15 +169,13 @@ impl State {
         let _reg = display.get_registry(&setup_q.handle(), eq.handle());
 
         let mut tmp = SetupState::default();
-        setup_q.roundtrip(&mut tmp).unwrap();
+        setup_q.roundtrip(&mut tmp).expect("Initial roundtrip failed");
 
-        let wl = tmp.into_state(conn, display);
+        let wl = tmp.into_state(conn, display).expect("Wayland globals negotiation failed");
         wl.surface.frame(&eq.handle(), ());
         wl.surface.commit();
 
-        let mut mag = magnifier::MagState::new();
-        mag.zoom = zoom;
-        mag.radius = radius;
+        let mut mag = magnifier::MagState::new(zoom, radius);
         mag.screencopy_mgr = Some(wl.screencopy_mgr.clone());
         mag.shm = Some(wl.shm.clone());
 
@@ -193,25 +206,23 @@ impl State {
     }
 
     fn render(&mut self) {
-        if !self.screen_configured {
-            return;
-        }
-        if self.wgpu.is_none() {
+        if !self.screen_configured || self.wgpu.is_none() {
             return;
         }
 
         // Upload screencopy data if available
         if self.mag.buffer_ready {
-            self.mag.upload_to_wgpu(self.wgpu.as_mut().unwrap());
-            self.mag.buffer_ready = false;
-            self.screencopy_pending = false;
-            self.has_clean_capture = true;
+            let Some(wgpu) = self.wgpu.as_mut() else { return };
+            if let Some(data) = self.mag.take_screen_data() {
+                wgpu.upload_screen_texture(data.width, data.height, data.stride, &data.data);
+                self.screencopy_pending = false;
+                self.has_clean_capture = true;
+            }
         }
 
         // Don't draw until we have a clean screencopy capture.
         // This prevents showing the red placeholder texture.
         if !self.has_clean_capture {
-            // Still commit the frame callback so the render loop keeps going
             let Some(wl) = &self.wl else { return };
             let Some(qh) = &self.qhandle else { return };
             wl.surface.frame(qh, ());
@@ -221,17 +232,12 @@ impl State {
 
         // Draw with captured screen texture
         let wgpu = self.wgpu.as_ref().unwrap();
-        wgpu.render_magnifier(&self.mag);
+        wgpu.render_magnifier(&self.mag.params());
 
         let Some(wl) = &self.wl else { return };
         let Some(qh) = &self.qhandle else { return };
         wl.surface.frame(qh, ());
         wl.surface.commit();
-    }
-
-    #[allow(dead_code)]
-    fn exit(&mut self) {
-        self.quit = true;
     }
 }
 
@@ -241,16 +247,22 @@ impl Drop for State {
     }
 }
 
+/// Wayland protocol objects kept alive for the lifetime of the application.
+/// Fields marked #[allow(dead_code)] are stored solely to prevent the
+/// Wayland proxy from being dropped (which would send a destroy request).
 pub struct Wl {
     #[allow(dead_code)]
     connection: Connection,
     #[allow(dead_code)]
     display: WlDisplay,
+    /// Kept alive to prevent surface destruction.
     #[allow(dead_code)]
     compositor: WlCompositor,
     surface: WlSurface,
+    /// Kept alive for pointer/keyboard capabilities.
     #[allow(dead_code)]
     seat: WlSeat,
+    /// Kept alive to prevent layer surface destruction.
     #[allow(dead_code)]
     layer_shell: ZwlrLayerShellV1,
     #[allow(dead_code)]
@@ -337,18 +349,16 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for State {
             lsf.ack_configure(serial);
             if state.wgpu.is_none() {
                 state.wgpu = Some(WgpuState::new(
-                    &state.wl.as_ref().unwrap().display,
-                    &state.wl.as_ref().unwrap().surface,
+                    &state.wl.as_ref().expect("wl not available").display,
+                    &state.wl.as_ref().expect("wl not available").surface,
                     width,
                     height,
                 ));
                 state.screen_configured = true;
-                // Request initial screencopy + frame
                 state.request_screencopy();
-                let wl = state.wl.as_ref().unwrap();
-                let qh = state.qhandle.as_ref().unwrap();
-                wl.surface.frame(qh, ());
-                wl.surface.commit();
+                let qh = state.qhandle.as_ref().unwrap().clone();
+                state.wl.as_ref().unwrap().surface.frame(&qh, ());
+                state.wl.as_ref().unwrap().surface.commit();
             }
         }
     }
@@ -379,8 +389,7 @@ impl Dispatch<WlKeyboard, ()> for State {
                 wayland_client::protocol::wl_keyboard::KeyState::Pressed,
             ) = key_state
         {
-            // key is a scancode; Escape is typically scancode 1
-            if key == 1 {
+            if key == config::KEY_ESCAPE_SCANCODE {
                 log!(target: "magnifier::wl", Level::Info, "Escape pressed, exiting");
                 state.quit = true;
             }
