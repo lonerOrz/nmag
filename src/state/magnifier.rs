@@ -141,7 +141,8 @@ impl MagState {
 
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
         log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
-        let _frame = self.screencopy_mgr.capture_output(1, output, qh, ());
+        // overlay=0: exclude overlay layers (our magnifier window)
+        let _frame = self.screencopy_mgr.capture_output(0, output, qh, ());
     }
 }
 
