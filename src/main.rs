@@ -29,7 +29,10 @@ fn main() {
 
     let (mut st, mut eq) = state::State::setup(cli.zoom, cli.radius);
     loop {
-        eq.blocking_dispatch(&mut st).unwrap();
+        if let Err(e) = eq.blocking_dispatch(&mut st) {
+            eprintln!("Wayland dispatch error: {e}");
+            break;
+        }
         if st.quit {
             break;
         }
