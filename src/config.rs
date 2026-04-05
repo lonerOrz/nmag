@@ -4,9 +4,9 @@
 pub const ZOOM_MIN: f32 = 0.1;
 pub const ZOOM_MAX: f32 = 50.0;
 
-// Zoom scroll factor: new_zoom = old_zoom * ZOOM_FACTOR_BASE ^ (-delta / ZOOM_DIVISOR)
-pub const ZOOM_FACTOR_BASE: f64 = 2.0;
-pub const ZOOM_DIVISOR: f64 = 100.0;
+// Zoom scroll: new_zoom = old_zoom * 2^(±1/ZOOM_DIVISOR) per notch.
+// 30 → ~2.3% per notch, responsive but not too aggressive.
+pub const ZOOM_DIVISOR: f64 = 30.0;
 
 // Zoom delta threshold for logging (avoids spam on tiny changes)
 pub const ZOOM_LOG_THRESHOLD: f32 = 0.001;
@@ -21,7 +21,6 @@ pub const ASSUMED_DT: f32 = 1.0 / 60.0;
 
 // Default CLI values
 pub const DEFAULT_ZOOM: f32 = 2.0;
-pub const DEFAULT_RADIUS: f32 = 150.0;
 
 // Input scancodes / button codes
 pub const BTN_LEFT: u32 = 272;

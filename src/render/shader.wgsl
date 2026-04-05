@@ -40,11 +40,9 @@ fn vs_main(input: VSIn) -> VSOut {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    // Full-screen zoom with pan (drag to move):
     let center = u.screen_size / 2.0;
     let screen_px = input.uv * u.screen_size;
 
-    // Zoom around center + pan offset (Y sign flipped for texture UV)
     let pan = vec2<f32>(u.pan_offset.x, -u.pan_offset.y);
     let zoomed_px = center + (screen_px - center - pan) / u.zoom;
 

@@ -238,7 +238,10 @@ impl State {
             return;
         }
 
-        // Draw with captured screen texture
+        // Draw with captured screen texture.
+        // No real-time screencopy refresh — wlr-screencopy captures the entire
+        // output including our overlay, causing a feedback loop. A single capture
+        // at startup avoids this entirely.
         let wgpu = self.wgpu.as_ref().unwrap();
         wgpu.render_magnifier(&self.mag.params());
 

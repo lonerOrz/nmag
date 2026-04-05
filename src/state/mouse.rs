@@ -91,10 +91,13 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 }
                 _ => {}
             },
-            Event::Axis { value, .. } => {
-                // Scroll to zoom.
+            Event::Axis {
+                axis: WEnum::Value(wayland_client::protocol::wl_pointer::Axis::VerticalScroll),
+                value,
+                ..
+            } => {
                 let base = state.mag.target_zoom() as f64;
-                let factor = config::ZOOM_FACTOR_BASE.powf(-value / config::ZOOM_DIVISOR);
+                let factor = 2.0_f64.powf(-value / config::ZOOM_DIVISOR);
                 let new_zoom =
                     (base * factor).clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64) as f32;
                 state.mag.set_target_zoom(new_zoom);

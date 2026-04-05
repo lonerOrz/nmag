@@ -127,7 +127,7 @@ impl WgpuState {
         let uni = Uniform {
             screen_size: [w as f32, h as f32],
             mouse_pos: [0.0, 0.0],
-            magnifier_radius: config::DEFAULT_RADIUS,
+            magnifier_radius: 0.0,
             zoom: config::DEFAULT_ZOOM,
             _pad: [0.0; 2],
             pan_offset: [0.0, 0.0],
