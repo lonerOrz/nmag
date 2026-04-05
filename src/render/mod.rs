@@ -127,7 +127,7 @@ impl WgpuState {
         let uni = Uniform {
             screen_size: [w as f32, h as f32],
             mouse_pos: [0.0, 0.0],
-            magnifier_radius: 0.0,
+            magnifier_radius: 0.0, // will be set by state
             zoom: config::DEFAULT_ZOOM,
             _pad: [0.0; 2],
             pan_offset: [0.0, 0.0],
@@ -166,8 +166,8 @@ impl WgpuState {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });

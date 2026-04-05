@@ -145,7 +145,7 @@ impl MagState {
     }
 
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
-        log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
+        log!(target: "magnifier::sc", Level::Info, "requesting screencopy");
         // Store the frame proxy — dropping it sends a destroy request!
         assert!(
             self._frame.is_none(),

@@ -22,10 +22,10 @@ pub const ASSUMED_DT: f32 = 1.0 / 60.0;
 // Default CLI values
 pub const DEFAULT_ZOOM: f32 = 2.0;
 
-// Input scancodes / button codes
-pub const BTN_LEFT: u32 = 272;
-pub const BTN_RIGHT: u32 = 273;
-pub const BTN_MIDDLE: u32 = 274;
+// Input scancodes / button codes (from linux/input-event-codes.h)
+pub const BTN_LEFT: u32 = 272; // BTN_LEFT
+pub const BTN_RIGHT: u32 = 273; // BTN_RIGHT
+pub const BTN_MIDDLE: u32 = 274; // BTN_MIDDLE
 pub const KEY_ESCAPE_SCANCODE: u32 = 1;
 
 // Shared memory
