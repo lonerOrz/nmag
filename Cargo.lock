@@ -612,25 +612,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
-name = "magnifier"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "clap",
- "env_logger",
- "log",
- "memmap2",
- "nix",
- "pollster",
- "raw-window-handle",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
- "wayland-protocols-wlr",
- "wgpu",
-]
-
-[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -714,6 +695,25 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nmag"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "clap",
+ "env_logger",
+ "log",
+ "memmap2",
+ "nix",
+ "pollster",
+ "raw-window-handle",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-protocols",
+ "wayland-protocols-wlr",
+ "wgpu",
 ]
 
 [[package]]

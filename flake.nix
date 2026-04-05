@@ -3,80 +3,113 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    treefmt-nix = {
+      url = "github:numtide/treefmt-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    {
-      self,
-      nixpkgs,
-      flake-utils,
-    }:
-    flake-utils.lib.eachDefaultSystem (
-      system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        nmag = pkgs.rustPlatform.buildRustPackage {
-          pname = "nmag";
-          version = "0.1.0";
-          src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-            makeWrapper
-          ];
+    inputs@{ flake-parts, ... }:
+    flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+
+      imports = [
+        inputs.treefmt-nix.flakeModule
+      ];
+
+      perSystem =
+        {
+          config,
+          self',
+          inputs',
+          pkgs,
+          system,
+          ...
+        }:
+        let
+          lib = pkgs.lib;
+
           buildInputs = with pkgs; [
             wayland
             wayland-protocols
             libGL
             vulkan-loader
+            libxkbcommon
           ];
-          postInstall = ''
-            wrapProgram $out/bin/nmag \
-              --prefix LD_LIBRARY_PATH : ${
-                pkgs.lib.makeLibraryPath [
-                  pkgs.libGL
-                  pkgs.vulkan-loader
-                ]
-              }
-          '';
-          meta = {
-            description = "Full-screen zoom for Wayland compositors";
-            homepage = "https://github.com/lonerOrz/nmag";
-            license = pkgs.lib.licenses.mit;
-            platforms = pkgs.lib.platforms.linux;
-            maintainers = with pkgs.lib.maintainers; [ lonerOrz ];
-            mainProgram = "nmag";
+
+          nativeBuildInputs = with pkgs; [
+            pkg-config
+            makeWrapper
+          ];
+        in
+        {
+          packages = {
+            default = self'.packages.nmag;
+            nmag = pkgs.rustPlatform.buildRustPackage {
+              pname = "nmag";
+              version = "0.1.0";
+              src = ./.;
+              cargoLock = {
+                lockFile = ./Cargo.lock;
+              };
+              inherit buildInputs nativeBuildInputs;
+              postInstall = ''
+                wrapProgram $out/bin/nmag \
+                  --prefix LD_LIBRARY_PATH : ${
+                    pkgs.lib.makeLibraryPath [
+                      pkgs.libGL
+                      pkgs.vulkan-loader
+                    ]
+                  }
+              '';
+              meta = with lib; {
+                description = "Full-screen zoom for Wayland compositors";
+                homepage = "https://github.com/lonerOrz/nmag";
+                license = licenses.mit;
+                mainProgram = "nmag";
+                maintainers = with lib.maintainers; [ lonerOrz ];
+                platforms = [
+                  "x86_64-linux"
+                  "aarch64-linux"
+                ];
+              };
+            };
+          };
+
+          devShells.default = pkgs.mkShell {
+            inherit buildInputs nativeBuildInputs;
+            packages = with pkgs; [
+              rustc
+              cargo
+              rust-analyzer
+              rustfmt
+              clippy
+              vulkan-tools
+              vulkan-validation-layers
+              mesa
+            ];
+
+            env = {
+              LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
+              VK_ICD_FILENAMES = lib.optionalString (
+                pkgs.stdenv.isLinux && pkgs.mesa ? out
+              ) "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64-linux.json";
+            };
+          };
+
+          treefmt = {
+            projectRootFile = "flake.nix";
+            programs.nixfmt = {
+              enable = true;
+              package = pkgs.nixfmt-rfc-style;
+            };
+            programs.rustfmt.enable = true;
           };
         };
-        vulkan-icd = pkgs.lib.makeLibraryPath [
-          pkgs.vulkan-loader
-          pkgs.libglvnd
-        ];
-      in
-      {
-        packages.nmag = nmag;
-        packages.default = self.packages.${system}.nmag;
-
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            pkg-config
-            wayland
-            libxkbcommon
-            vulkan-tools
-            vulkan-validation-layers
-          ];
-
-          shellHook = ''
-            # Add vulkan ICD and loader to library path
-            export LD_LIBRARY_PATH="${vulkan-icd}:$LD_LIBRARY_PATH"
-
-            # Use Lavapipe (software Vulkan) if no hardware driver
-            if [ -f "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64-linux.json" ]; then
-              export VK_ICD_FILENAMES="${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64-linux.json"
-            fi
-          '';
-        };
-      }
-    );
+    };
 }
