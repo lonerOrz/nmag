@@ -309,6 +309,37 @@ impl WgpuState {
         }
     }
 
+    /// Returns the current surface dimensions.
+    pub fn dimensions(&self) -> (u32, u32) {
+        (self.config.width, self.config.height)
+    }
+
+    /// Reconfigure the surface for a new size.
+    /// Called when the compositor sends a new Configure event (e.g. resize, hotplug).
+    pub fn resize(&mut self, w: u32, h: u32) {
+        self.config.width = w;
+        self.config.height = h;
+        self.surface.configure(&self.device, &self.config);
+
+        // Rebuild the quad to match the new dimensions
+        let (qv, qi) = build_quad(w as f32, h as f32);
+        self.vbuf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&qv),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
+        self.ibuf = self
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                contents: bytemuck::cast_slice(&qi),
+                usage: wgpu::BufferUsages::INDEX,
+            });
+        self.quad_count = qi.len() as u32;
+    }
+
     pub fn upload_screen_texture(&mut self, w: u32, h: u32, stride: u32, data: &[u8]) {
         let tex = self.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -366,6 +397,8 @@ impl WgpuState {
         });
         // The bind_group holds a ref-counted handle to the texture view,
         // which in turn holds the texture alive. No separate field needed.
+        // Old textures are released automatically when the old bind_group
+        // is replaced, as their ref-count drops to zero.
     }
 
     /// Render the magnifier effect using the given parameters.

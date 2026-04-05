@@ -158,7 +158,7 @@ pub struct State {
     screen_configured: bool,
     has_clean_capture: bool,
     /// Last frame callback timestamp in seconds (monotonic, from compositor).
-    last_frame_time: f32,
+    last_frame_time: f64,
 }
 
 impl State {
@@ -194,7 +194,7 @@ impl State {
                 quit: false,
                 screen_configured: false,
                 has_clean_capture: false,
-                last_frame_time: 0.0,
+                last_frame_time: 0.0f64,
             },
             eq,
         )
@@ -322,17 +322,17 @@ impl Dispatch<WlCallback, ()> for State {
     ) {
         log!(target: "magnifier::wl", Level::Info, "WlCallback: {:?}", event);
         if let wayland_client::protocol::wl_callback::Event::Done { callback_data } = event {
-            let now_s = callback_data as f32 / 1000.0;
+            let now_s = callback_data as f64 / 1000.0;
             let dt = if state.last_frame_time > 0.0 {
                 // Clamp to avoid huge jumps (e.g. after focus loss).
                 (now_s - state.last_frame_time).clamp(0.001, 0.1)
             } else {
-                config::ASSUMED_DT
+                config::ASSUMED_DT as f64
             };
             state.last_frame_time = now_s;
 
             // Advance zoom animation before rendering.
-            state.mag.tick(dt);
+            state.mag.tick(dt as f32);
             state.render();
         }
     }
@@ -357,7 +357,12 @@ impl Dispatch<ZwlrLayerSurfaceV1, ()> for State {
         } = event
         {
             lsf.ack_configure(serial);
-            if state.wgpu.is_none() {
+            if let Some(ref mut wgpu) = state.wgpu {
+                let (w, h) = wgpu.dimensions();
+                if w != width || h != height {
+                    wgpu.resize(width, height);
+                }
+            } else {
                 state.wgpu = Some(WgpuState::new(
                     &state.wl.as_ref().unwrap()._display,
                     &state.wl.as_ref().unwrap().surface,

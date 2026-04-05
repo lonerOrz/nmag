@@ -25,9 +25,10 @@ pub struct ScreenBuf {
 }
 
 // SAFETY: ScreenBuf owns the mmap'd memory and the NonNull is derived from it.
-// Wayland protocol events are sequential on the main thread.
+// Wayland protocol events are sequential on the main thread, so mutable access
+// is never concurrent. Only Send is needed; Sync would allow concurrent reads
+// of mutable mmap'd memory, which is not safe.
 unsafe impl Send for ScreenBuf {}
-unsafe impl Sync for ScreenBuf {}
 
 impl ScreenBuf {
     fn as_slice(&self) -> &[u8] {
@@ -147,6 +148,10 @@ impl MagState {
         log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
         // overlay=0: exclude overlay layers (our magnifier window)
         // Store the frame proxy — dropping it sends a destroy request!
+        assert!(
+            self._frame.is_none(),
+            "request_frame called while a frame is still in flight"
+        );
         self._frame = Some(self.screencopy_mgr.capture_output(0, output, qh, ()));
     }
 }
