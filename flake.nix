@@ -103,7 +103,7 @@
             projectRootFile = "flake.nix";
             programs.nixfmt = {
               enable = true;
-              package = pkgs.nixfmt-rfc-style;
+              package = pkgs.nixfmt;
             };
             programs.rustfmt.enable = true;
           };

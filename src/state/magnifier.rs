@@ -59,6 +59,9 @@ pub struct MagState {
     // Kept alive until the compositor releases them (see hyprmag's PoolBuffer pattern)
     _pool: Option<WlShmPool>,
     _buffer: Option<WlBuffer>,
+    /// Active screencopy frame. MUST be kept alive — dropping it sends a
+    /// destroy request to the compositor, cancelling the capture.
+    _frame: Option<ZwlrScreencopyFrameV1>,
 }
 
 impl MagState {
@@ -80,6 +83,7 @@ impl MagState {
             shm,
             _pool: None,
             _buffer: None,
+            _frame: None,
         }
     }
 
@@ -142,7 +146,8 @@ impl MagState {
     pub fn request_frame(&mut self, qh: &QueueHandle<super::State>, output: &WlOutput) {
         log!(target: "magnifier::sc", Level::Debug, "requesting screencopy");
         // overlay=0: exclude overlay layers (our magnifier window)
-        let _frame = self.screencopy_mgr.capture_output(0, output, qh, ());
+        // Store the frame proxy — dropping it sends a destroy request!
+        self._frame = Some(self.screencopy_mgr.capture_output(0, output, qh, ()));
     }
 }
 
@@ -243,9 +248,11 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for super::State {
                 // Clean up wayland objects — compositor is done writing
                 state.mag._buffer.take();
                 state.mag._pool.take();
+                state.mag._frame.take();
             }
             Event::Failed => {
                 log!(target: "magnifier::sc", Level::Error, "screencopy failed");
+                state.mag._frame.take();
             }
             Event::Damage { .. } | Event::BufferDone => {}
             _ => {}
