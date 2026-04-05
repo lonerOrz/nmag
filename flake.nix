@@ -96,9 +96,6 @@
 
             env = {
               LD_LIBRARY_PATH = lib.makeLibraryPath buildInputs;
-              VK_ICD_FILENAMES = lib.optionalString (
-                pkgs.stdenv.isLinux && pkgs.mesa ? out
-              ) "${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64-linux.json";
             };
           };
 
