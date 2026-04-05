@@ -30,7 +30,7 @@ pub const BTN_MIDDLE: u32 = 274;
 pub const KEY_ESCAPE_SCANCODE: u32 = 1;
 
 // Shared memory
-pub const SHM_FD_NAME: &str = "magnifier";
+pub const SHM_FD_NAME: &str = "nmag";
 
 // Layer shell
-pub const LAYER_SURFACE_NAMESPACE: &str = "magnifier";
+pub const LAYER_SURFACE_NAMESPACE: &str = "nmag";
