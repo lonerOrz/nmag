@@ -45,13 +45,20 @@ pub struct MagState {
     /// True when displayed_zoom has not yet converged to target_zoom.
     animating: bool,
     pub radius: f32,
+    /// Mouse position in **logical** (surface-local) pixels.
     pub mouse_x: f64,
     pub mouse_y: f64,
+    /// Fixed center at last zoom action (does NOT change on mouse move).
+    /// Stored in **physical** (buffer) pixels.
+    pub zoom_center_x: f64,
+    pub zoom_center_y: f64,
     pub screen_w: u32,
     pub screen_h: u32,
-    /// Pan offset accumulated from dragging (pixels, screen-space).
+    /// Pan offset accumulated from dragging (**physical** buffer pixels).
     pub pan_x: f64,
     pub pan_y: f64,
+    /// Wayland output scale factor (logical → physical multiplier).
+    output_scale: i32,
     buffer: Option<ScreenBuf>,
     /// True when a screencopy frame has been fully written and is ready to read.
     pub buffer_ready: bool,
@@ -74,10 +81,13 @@ impl MagState {
             radius: 0.0,
             mouse_x: 0.0,
             mouse_y: 0.0,
+            zoom_center_x: -1.0,
+            zoom_center_y: -1.0,
             screen_w: 0,
             screen_h: 0,
             pan_x: 0.0,
             pan_y: 0.0,
+            output_scale: 1,
             buffer: None,
             buffer_ready: false,
             screencopy_mgr,
@@ -93,17 +103,78 @@ impl MagState {
         MagnifierParams {
             mouse_x: self.mouse_x as f32,
             mouse_y: self.mouse_y as f32,
+            zoom_center_x: self.zoom_center_x as f32,
+            zoom_center_y: self.zoom_center_y as f32,
             radius: self.radius,
             zoom: self.zoom,
             pan_x: self.pan_x as f32,
             pan_y: self.pan_y as f32,
+            buffer_w: self.screen_w,
+            buffer_h: self.screen_h,
         }
     }
 
-    /// Set a new target zoom. This starts (or restarts) the smooth animation.
-    pub fn set_target_zoom(&mut self, new_zoom: f32) {
+    /// Set a new zoom level, adjusting pan so the world position under the cursor stays fixed.
+    pub fn set_target_zoom(&mut self, new_zoom: f32, mouse_x: f64, mouse_y: f64) {
+        let old_zoom = self.zoom;
+
+        // Jump directly to the new zoom (no animation)
+        self.zoom = new_zoom;
         self.target_zoom = new_zoom;
-        self.animating = true;
+        self.animating = false;
+
+        // Compute old center (before we update it)
+        let center_old_x = if self.zoom_center_x >= 0.0 {
+            self.zoom_center_x as f32
+        } else {
+            self.screen_w as f32 / 2.0
+        };
+        let center_old_y = if self.zoom_center_y >= 0.0 {
+            self.zoom_center_y as f32
+        } else {
+            self.screen_h as f32 / 2.0
+        };
+
+        // Skip pan adjustment if no screen info yet
+        if self.screen_w == 0 || self.screen_h == 0 {
+            return;
+        }
+
+        // Convert mouse from logical to **physical** (buffer) pixels
+        let scale = self.output_scale as f64;
+        let mx = (mouse_x * scale) as f32;
+        // Flip Y: Wayland mouse is top-left origin (Y down),
+        // but the texture samples with bottom-left origin (Y up).
+        let my = (self.screen_h as f64 - mouse_y * scale) as f32;
+
+        // Update zoom center to the current mouse position (physical)
+        self.zoom_center_x = mouse_x * scale;
+        self.zoom_center_y = self.screen_h as f64 - mouse_y * scale;
+
+        // Compute world position under mouse using OLD center, OLD zoom, OLD pan.
+        // The shader applies: zoomed_px = center + (screen_px - center - pan) / zoom
+        // For Y, the shader negates pan: pan_shader.y = -pan.y
+        // So: world_y = center_y + (mouse_y - center_y + pan_y) / zoom
+        let world_x = center_old_x + (mx - center_old_x - self.pan_x as f32) / old_zoom;
+        let world_y = center_old_y + (my - center_old_y + self.pan_y as f32) / old_zoom;
+
+        // Compute new pan so that the same world position stays under the mouse.
+        // For X: world_x = cx_new + (mx - cx_new - pan_x_new) / new_zoom
+        //   Since cx_new = mx: pan_x_new = (mx - world_x) * new_zoom
+        // For Y: world_y = cy_new + (my - cy_new + pan_y_new) / new_zoom
+        //   Since cy_new = my: pan_y_new = (world_y - my) * new_zoom
+        self.pan_x = ((mx - world_x) * new_zoom) as f64;
+        self.pan_y = ((world_y - my) * new_zoom) as f64;
+    }
+
+    /// Update the Wayland output scale factor.
+    pub fn set_output_scale(&mut self, scale: i32) {
+        self.output_scale = scale.max(1);
+    }
+
+    /// Returns the current output scale factor.
+    pub fn output_scale(&self) -> i32 {
+        self.output_scale
     }
 
     /// Returns the current target zoom. Useful for computing new targets relative

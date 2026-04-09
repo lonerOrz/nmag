@@ -13,10 +13,10 @@ pub struct MouseState {
     cursor_dev: Option<WpCursorShapeDeviceV1>,
     /// Whether the user is holding left button to drag the view.
     dragging: bool,
-    /// Mouse position at drag start.
+    /// Mouse position at drag start (**physical** pixels).
     drag_start_x: f64,
     drag_start_y: f64,
-    /// Pan offset at drag start.
+    /// Pan offset at drag start (**physical** pixels).
     drag_pan_x: f64,
     drag_pan_y: f64,
 }
@@ -63,8 +63,9 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 if state.mouse.dragging {
                     let dx = surface_x - state.mouse.drag_start_x;
                     let dy = surface_y - state.mouse.drag_start_y;
-                    state.mag.pan_x = state.mouse.drag_pan_x + dx;
-                    state.mag.pan_y = state.mouse.drag_pan_y + dy;
+                    let scale = state.mag.output_scale() as f64;
+                    state.mag.pan_x = state.mouse.drag_pan_x + dx * scale;
+                    state.mag.pan_y = state.mouse.drag_pan_y + dy * scale;
                 }
             }
             Event::Button {
@@ -75,8 +76,9 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 ButtonState::Pressed => {
                     if button == config::BTN_LEFT {
                         state.mouse.dragging = true;
-                        state.mouse.drag_start_x = state.mag.mouse_x;
-                        state.mouse.drag_start_y = state.mag.mouse_y;
+                        let scale = state.mag.output_scale() as f64;
+                        state.mouse.drag_start_x = state.mag.mouse_x * scale;
+                        state.mouse.drag_start_y = state.mag.mouse_y * scale;
                         state.mouse.drag_pan_x = state.mag.pan_x;
                         state.mouse.drag_pan_y = state.mag.pan_y;
                     } else if button == config::BTN_RIGHT || button == config::BTN_MIDDLE {
@@ -100,7 +102,9 @@ impl Dispatch<WlPointer, (), super::State> for MouseState {
                 let factor = 2.0_f64.powf(-value / config::ZOOM_DIVISOR);
                 let new_zoom =
                     (base * factor).clamp(config::ZOOM_MIN as f64, config::ZOOM_MAX as f64) as f32;
-                state.mag.set_target_zoom(new_zoom);
+                state
+                    .mag
+                    .set_target_zoom(new_zoom, state.mag.mouse_x, state.mag.mouse_y);
             }
             Event::Frame => {}
             _ => {}

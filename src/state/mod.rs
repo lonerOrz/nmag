@@ -53,23 +53,27 @@ struct SetupState {
     screencopy_mgr: Option<ZwlrScreencopyManagerV1>,
     shm: Option<WlShm>,
     output: Option<WlOutput>,
+    output_scale: i32,
 }
 
 impl SetupState {
-    fn into_state(self, connection: Connection, display: WlDisplay) -> Result<Wl> {
-        Ok(Wl {
-            _connection: connection,
-            _display: display,
-            _compositor: require_global(self.compositor, "wl_compositor")?,
-            surface: require_global(self.surface, "wl_surface")?,
-            _seat: require_global(self.seat, "wl_seat")?,
-            _layer_shell: require_global(self.layer_shell, "zwlr_layer_shell_v1")?,
-            _layer_surface: require_global(self.layer_surface, "zwlr_layer_surface_v1")?,
-            cursor_mgr: require_global(self.cursor_mgr, "wp_cursor_shape_manager_v1")?,
-            screencopy_mgr: require_global(self.screencopy_mgr, "zwlr_screencopy_manager_v1")?,
-            shm: require_global(self.shm, "wl_shm")?,
-            output: require_global(self.output, "wl_output")?,
-        })
+    fn into_state(self, connection: Connection, display: WlDisplay) -> Result<(Wl, i32)> {
+        Ok((
+            Wl {
+                _connection: connection,
+                _display: display,
+                _compositor: require_global(self.compositor, "wl_compositor")?,
+                surface: require_global(self.surface, "wl_surface")?,
+                _seat: require_global(self.seat, "wl_seat")?,
+                _layer_shell: require_global(self.layer_shell, "zwlr_layer_shell_v1")?,
+                _layer_surface: require_global(self.layer_surface, "zwlr_layer_surface_v1")?,
+                cursor_mgr: require_global(self.cursor_mgr, "wp_cursor_shape_manager_v1")?,
+                screencopy_mgr: require_global(self.screencopy_mgr, "zwlr_screencopy_manager_v1")?,
+                shm: require_global(self.shm, "wl_shm")?,
+                output: require_global(self.output, "wl_output")?,
+            },
+            self.output_scale.max(1),
+        ))
     }
 }
 
@@ -146,6 +150,22 @@ impl Dispatch<WlRegistry, QueueHandle<State>> for SetupState {
     }
 }
 
+impl Dispatch<WlOutput, ()> for SetupState {
+    fn event(
+        s: &mut Self,
+        _output: &WlOutput,
+        event: <WlOutput as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<SetupState>,
+    ) {
+        use wayland_client::protocol::wl_output::Event;
+        if let Event::Scale { factor } = event {
+            s.output_scale = factor;
+        }
+    }
+}
+
 /// Top-level application state.
 pub struct State {
     wl: Option<Wl>,
@@ -175,13 +195,14 @@ impl State {
             .roundtrip(&mut tmp)
             .expect("Initial roundtrip failed");
 
-        let wl = tmp
+        let (wl, scale) = tmp
             .into_state(conn, display)
             .expect("Wayland globals negotiation failed");
         wl.surface.frame(&eq.handle(), ());
         wl.surface.commit();
 
-        let mag = magnifier::MagState::new(zoom, wl.screencopy_mgr.clone(), wl.shm.clone());
+        let mut mag = magnifier::MagState::new(zoom, wl.screencopy_mgr.clone(), wl.shm.clone());
+        mag.set_output_scale(scale);
 
         (
             Self {
@@ -277,7 +298,23 @@ pub struct Wl {
 
 delegate_log!(WlCompositor);
 delegate_log!(WlSurface);
-delegate_log!(WlOutput);
+
+impl Dispatch<WlOutput, ()> for State {
+    fn event(
+        state: &mut Self,
+        _output: &WlOutput,
+        event: <WlOutput as Proxy>::Event,
+        _data: &(),
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        use wayland_client::protocol::wl_output::Event;
+        if let Event::Scale { factor } = event {
+            log!(target: "magnifier::wl", Level::Debug, "Output scale: {factor}");
+            state.mag.set_output_scale(factor);
+        }
+    }
+}
 
 impl Dispatch<WlSeat, ()> for State {
     fn event(

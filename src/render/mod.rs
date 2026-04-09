@@ -127,7 +127,8 @@ impl WgpuState {
         let uni = Uniform {
             screen_size: [w as f32, h as f32],
             mouse_pos: [0.0, 0.0],
-            magnifier_radius: 0.0, // will be set by state
+            zoom_center: [0.0, 0.0],
+            magnifier_radius: 0.0,
             zoom: config::DEFAULT_ZOOM,
             _pad: [0.0; 2],
             pan_offset: [0.0, 0.0],
@@ -405,8 +406,9 @@ impl WgpuState {
     /// Accepts a plain `MagnifierParams` struct to avoid coupling to the state module.
     pub fn render_magnifier(&self, params: &MagnifierParams) {
         let uni = Uniform {
-            screen_size: [self.config.width as f32, self.config.height as f32],
+            screen_size: [params.buffer_w as f32, params.buffer_h as f32],
             mouse_pos: [params.mouse_x, params.mouse_y],
+            zoom_center: [params.zoom_center_x, params.zoom_center_y],
             magnifier_radius: params.radius,
             zoom: params.zoom,
             _pad: [0.0; 2],

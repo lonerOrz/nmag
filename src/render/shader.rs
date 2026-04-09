@@ -3,6 +3,7 @@
 pub struct Uniform {
     pub screen_size: [f32; 2],
     pub mouse_pos: [f32; 2],
+    pub zoom_center: [f32; 2],
     pub magnifier_radius: f32,
     pub zoom: f32,
     pub _pad: [f32; 2],

@@ -1,6 +1,7 @@
 struct Uniform {
     screen_size: vec2<f32>,
     mouse_pos: vec2<f32>,
+    zoom_center: vec2<f32>,
     magnifier_radius: f32,
     zoom: f32,
     _pad: vec2<f32>,
@@ -40,7 +41,12 @@ fn vs_main(input: VSIn) -> VSOut {
 
 @fragment
 fn fs_main(input: VSOut) -> @location(0) vec4<f32> {
-    let center = u.screen_size / 2.0;
+    var center: vec2<f32>;
+    if (u.zoom_center.x >= 0.0) {
+        center = u.zoom_center;
+    } else {
+        center = u.screen_size * 0.5;
+    }
     let screen_px = input.uv * u.screen_size;
 
     let pan = vec2<f32>(u.pan_offset.x, -u.pan_offset.y);
